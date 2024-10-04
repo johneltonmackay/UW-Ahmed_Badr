@@ -2,13 +2,13 @@
  * @NApiVersion 2.1
  * @NScriptType MapReduceScript
  */
-define(['N/record', 'N/redirect', 'N/search', 'N/runtime'],
+define(['N/record', 'N/redirect', 'N/search', 'N/runtime', 'N/file', 'N/https'],
     /**
  * @param{record} record
  * @param{redirect} redirect
  * @param{search} search
  */
-    (record, redirect, search, runtime) => {
+    (record, redirect, search, runtime, file, https) => {
 
         const getInputData = (inputContext) => {
             let inputData = {}
@@ -22,13 +22,21 @@ define(['N/record', 'N/redirect', 'N/search', 'N/runtime'],
                 let paramParseData = JSON.parse(suiteletParam)
                 log.debug('getInputData: paramParseData', paramParseData);
 
-                let paramArrEPIData = JSON.parse(paramParseData.epiData)
+                let paramArrEPIFileId = paramParseData.epiData
                 let paramTransKey = paramParseData.transKey
                 let arrPayrollCycleData = searchPayrollCycleEntries()
                 let arrEmployeeId = searchEmployeeId()
 
-                paramArrEPIData.forEach((data, index) => {
 
+                let fileObj = file.load({
+                    id: paramArrEPIFileId
+                });
+            
+                let fileContent = fileObj.getContents();
+                let paramArrEPIData = JSON.parse(fileContent)
+                log.debug('paramArrEPIData', paramArrEPIData)
+
+                paramArrEPIData.forEach((data, index) => {
                     let {
                         custpage_batch_id_col_02,
                         custpage_file_no_col_03,
@@ -39,7 +47,7 @@ define(['N/record', 'N/redirect', 'N/search', 'N/runtime'],
                         item.batchId == custpage_batch_id_col_02 &&
                         item.dateRange == custpage_date_range
                     );
-                    log.debug('arrPayrollCycleData arrFilteredItems', arrFilteredItems)
+                    // log.debug('arrPayrollCycleData arrFilteredItems', arrFilteredItems)
                 
                     if (arrFilteredItems.length > 0) {
                         skippedLines.push({
@@ -56,7 +64,7 @@ define(['N/record', 'N/redirect', 'N/search', 'N/runtime'],
                         const arrFilteredEmployee = arrEmployeeId.filter(item =>
                             item.fileNo == custpage_file_no_col_03
                         );
-                        log.debug('arrEmployeeId arrFilteredEmployee', arrFilteredEmployee)
+                        // log.debug('arrEmployeeId arrFilteredEmployee', arrFilteredEmployee)
 
                         if (arrFilteredEmployee.length > 0) {
                             data.custpage_employee = arrFilteredEmployee[0].employeeId
@@ -128,33 +136,74 @@ define(['N/record', 'N/redirect', 'N/search', 'N/runtime'],
             log.debug('reduce arrSkippedLines', arrSkippedLines);
 
             if(arrToProcess.length > 0){
+
                 let parentRecId = createEPIParent(objReduceValues)
 
                 if (parentRecId){
-                    log.debug('parentRecId', parentRecId)
-                    arrToProcess.forEach(data => {
-                        data.custpage_transaction_keys = strTransKey
-                        data.custpage_remarks = 'Newly Created'
-                        data.custpage_parent_record_id = parentRecId
-                        data.custpage_date_range_child = arrToProcess[0].custpage_date_range
-                        let objRecData = record.create({
-                            type: 'customrecord_epi4a110_child',
-                            isDynamic: true
-                        })
-                        for (const key in data) {
-                            if(data[key] != undefined && data[key] != null && data[key] != ''){
-                                let fieldIds = key.replace('custpage', 'custrecord')
-                                let fieldValue = data[key]
-                                objRecData.setValue({
-                                    fieldId: fieldIds,
-                                    value: fieldValue
-                                })
+                    const CHUNK_SIZE = 40;
+
+                    if (arrToProcess.length > CHUNK_SIZE) {
+                        let chunks = splitArrayIntoChunks(arrToProcess, CHUNK_SIZE);
+                        
+                        for (let i = 0; i < chunks.length; i++) {
+                            let chunk = chunks[i];
+                            chunk.forEach(data => {
+                                data.custpage_transaction_keys = strTransKey
+                                data.custpage_remarks = 'Newly Created'
+                                data.custpage_parent_record_id = parentRecId
+                                data.custpage_date_range_child = arrToProcess[0].custpage_date_range
+                            });
+
+                            log.debug('length', chunk.length)
+                            log.debug('chunk', chunk)
+
+                            let fileId = createFileLogs(chunk, i)
+
+                            if (fileId){
+                                try {
+                                    let slResponse = https.requestSuitelet({
+                                        scriptId: "customscript_process_epi_sl",
+                                        deploymentId: "customdeploy_process_epi_sl",
+                                        urlParams: {
+                                            data: fileId
+                                        }
+                                    });
+                                    log.debug('rawResponseBody', slResponse);
+                                } catch (error) {
+                                    log.error('error', error.message)
+                                }
                             }
                         }
-                        let recordId = objRecData.save()
-                        log.debug('reduce recordId', recordId) 
-                    });     
+
+                    } else {
+                        arrToProcess.forEach(data => {
+                            data.custpage_transaction_keys = strTransKey
+                            data.custpage_remarks = 'Newly Created'
+                            data.custpage_parent_record_id = parentRecId
+                            data.custpage_date_range_child = arrToProcess[0].custpage_date_range
+                        });
+
+                        let fileId = createFileLogs(arrToProcess, 0)
+
+                        if (fileId){
+
+                            try {
+                                let slResponse = https.requestSuitelet({
+                                    scriptId: "customscript_process_epi_sl",
+                                    deploymentId: "customdeploy_process_epi_sl",
+                                    urlParams: {
+                                        data: fileId
+                                    }
+                                });
+                                log.debug('rawResponseBody', slResponse);  
+                            } catch (error) {
+                                log.error('error', error.message)
+                            }
+
+                        }
+                    }
                 }
+
             } 
         }
 
@@ -163,6 +212,37 @@ define(['N/record', 'N/redirect', 'N/search', 'N/runtime'],
         }
 
         //Private 
+
+        const createFileLogs = (arrLogs, index) => {
+            let logId = null
+            log.debug('createFileLogs arrLogs', arrLogs)
+            try {
+                let fileName = `paramChunkContractorData_${index}.json`;
+    
+                let fileObj = file.create({
+                    name: fileName,
+                    fileType: file.Type.JSON,
+                    contents: JSON.stringify(arrLogs)
+                });
+    
+                fileObj.folder = 1490; // NSI TC > Export_CSV > Contractor Template > Parameter Contractor Data > Parameter Chunk Contractor Data
+    
+                logId = fileObj.save();
+                log.debug('createFileLogs logId', logId)
+            } catch (error) {
+                log.error('createFileLogs error', error.message)
+            }
+            return logId
+        }
+
+
+        const splitArrayIntoChunks = (array, chunkSize)  => { 
+            let result = [];
+            for (let i = 0; i < array.length; i += chunkSize) {
+                result.push(array.slice(i, i + chunkSize));
+            }
+            return result;
+        }
 
         const createEPIParent = (objReduceValues) => {
             let recordId = null
@@ -241,6 +321,8 @@ define(['N/record', 'N/redirect', 'N/search', 'N/runtime'],
                         ['isinactive', 'is', 'F'],
                         'AND',
                         ['custentity_adp_file_number', 'isnotempty', ''],
+                        'AND',
+                        ['employeestatus', 'anyof', '9'],
                     ],
                     columns: [
                         search.createColumn({name: 'internalid'}),
@@ -372,3 +454,33 @@ define(['N/record', 'N/redirect', 'N/search', 'N/runtime'],
         return {getInputData, map, reduce, summarize}
 
     });
+
+    // let parentRecId = createEPIParent(objReduceValues)
+
+    // if (parentRecId){
+    //     log.debug('parentRecId', parentRecId)
+
+    //     arrToProcess.forEach(data => {
+    //         data.custpage_transaction_keys = strTransKey
+    //         data.custpage_remarks = 'Newly Created'
+    //         data.custpage_parent_record_id = parentRecId
+    //         data.custpage_date_range_child = arrToProcess[0].custpage_date_range
+
+    //         let objRecData = record.create({
+    //             type: 'customrecord_epi4a110_child',
+    //             isDynamic: true
+    //         })
+    //         for (const key in data) {
+    //             if(data[key] != undefined && data[key] != null && data[key] != ''){
+    //                 let fieldIds = key.replace('custpage', 'custrecord')
+    //                 let fieldValue = data[key]
+    //                 objRecData.setValue({
+    //                     fieldId: fieldIds,
+    //                     value: fieldValue
+    //                 })
+    //             }
+    //         }
+    //         let recordId = objRecData.save()
+    //         log.debug('reduce recordId', recordId) 
+    //     });     
+    // }

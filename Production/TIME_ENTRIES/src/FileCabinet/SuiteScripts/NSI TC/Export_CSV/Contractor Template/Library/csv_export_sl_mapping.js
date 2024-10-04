@@ -9,6 +9,9 @@ define([],
             scriptid: 'customscript_csv_export_landing_page_sl',
             mrscriptid: 'customscript_create_epi_mr',
             deploymentid: 'customdeploy_csv_export_landing_page_sl',
+            uploaddeploymentid: 'customdeploy_upload_csv_sl',
+            uploadscriptid: 'customscript_upload_csv_sl',
+
             form: {
                 title: "Export Contractors Payroll Template",
                 fields: {
@@ -43,10 +46,24 @@ define([],
                         ismandatory: true,
                         source: 'customlist_epi_date_options',
                     },
+                    TOTAL_FEE_EARNING: {
+                        id: "custpage_total_earn_5_amount_col_7",
+                        type: "TEXT",
+                        label: "Total EARNINGS 5 AMOUNT FEE",
+                        ishidden: false,
+                        isdisabled: true
+                    },
+                    TOTAL_HST_EARNING: {
+                        id: "custpage_total_earn_5_amount_col_9",
+                        type: "TEXT",
+                        label: "Total EARNINGS 5 AMOUNT HST",
+                        ishidden: false,
+                        isdisabled: true
+                    },
                 },
                 buttons: {
                     SUBMIT: {
-                        label: 'Create Employees Payroll Records',
+                        label: 'Create Contractors Payroll Records',
                     },
                     SEARCH_ITEM: {
                         label: 'PREVIEW',
@@ -57,6 +74,11 @@ define([],
                         label: 'DOWNLOAD CSV',
                         id: 'custpage_download_csv_btn',
                         functionName: 'exportCSV'
+                    },
+                    IMPORT_TIMESHEET: {
+                        label: 'IMPORT TIMESHEET',
+                        id: 'custpage_import_timesheet_btn',
+                        functionName: 'importCSV'
                     },
                     REFRESH: {
                         label: 'REFRESH',

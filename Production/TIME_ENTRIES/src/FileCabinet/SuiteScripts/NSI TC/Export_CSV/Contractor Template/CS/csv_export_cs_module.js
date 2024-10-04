@@ -48,16 +48,17 @@ define(['N/ui/message', 'N/search', 'N/currentRecord', '../Library/csv_export_sl
                                 duration: 5000 
                             });
 
-                            getSublistData()
+                            // getSublistData()
 
                             let objEPIData = currentRecord.getValue({
                                 fieldId: 'custpage_epi_data',
                             });
+
                             var suiteletUrl = url.resolveScript({
                                 scriptId: 'customscript_create_epi_landing_page_sl', 
                                 deploymentId: 'customdeploy_create_epi_landing_page_sl',
                                 params: {
-                                    postData: JSON.stringify(objEPIData)
+                                    postData: objEPIData // paramContractorData.txt
                                 }
                             });
                     
@@ -85,7 +86,7 @@ define(['N/ui/message', 'N/search', 'N/currentRecord', '../Library/csv_export_sl
                 var rec = scriptContext.currentRecord;
                 var intItemLines = rec.getLineCount('custpage_sublist');
                 if(intItemLines == 0) {
-				    alert('User Error: Please Convert at least one item.');
+				    alert('User Error: Please search at least one item.');
 				    return false;
 			    } else {
                     rec.setValue({
@@ -182,6 +183,23 @@ define(['N/ui/message', 'N/search', 'N/currentRecord', '../Library/csv_export_sl
             }
         }
 
+        function importCSV(scriptContext) {
+            try {          
+                var sURL = url.resolveScript({
+                    scriptId : slMapping.SUITELET.uploadscriptid,
+                    deploymentId : slMapping.SUITELET.uploaddeploymentid,
+                    returnExternalUrl : false,
+                });
+            
+                window.onbeforeunload = null;
+                window.location = sURL;
+            } catch (error) {
+                console.log('Error: refreshPage', error.message)
+            }
+        }
+
+        
+
         function exportCSV(scriptContext) {
             try {         
                 let arrParameter = []
@@ -275,7 +293,8 @@ define(['N/ui/message', 'N/search', 'N/currentRecord', '../Library/csv_export_sl
             searchItems: searchItems,
             refreshPage: refreshPage,
             exportCSV: exportCSV,
-            getSublistData: getSublistData
+            getSublistData: getSublistData,
+            importCSV: importCSV
         };
 
     });

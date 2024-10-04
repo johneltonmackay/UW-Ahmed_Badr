@@ -126,9 +126,10 @@ define(["N/ui/serverWidget", "N/search", "N/task", "N/file", "N/record", "../Lib
             log.debug('addButtons options', options)
             try {
                 if(options.status == 'PROCESSING' || options.status == 'PENDING'){
-                    options.form.addSubmitButton({
+                    const submitButton = options.form.addSubmitButton({
                         label: slMapping.SUITELET.form.buttons.SUBMIT.label,
                     });
+                    submitButton.isHidden = true;
                 } else if (options.status == 'COMPLETE' && options.status != 'FAILED'){
                     options.form.addButton(slMapping.SUITELET.form.buttons.GO_BACK)
                     options.form.addButton(slMapping.SUITELET.form.buttons.VIEW_RESULTS)
@@ -312,39 +313,77 @@ define(["N/ui/serverWidget", "N/search", "N/task", "N/file", "N/record", "../Lib
         }
 
         const statusChecker = (paramTaskId, objForm) => {
-
+            // Create a progress bar container
+            const progressContainer = objForm.addField({
+                id: 'custpage_progress_container',
+                type: serverWidget.FieldType.INLINEHTML,
+                label: 'Progress Bar'
+            });
+        
+            // Set the HTML content for the progress bar and hidden field
+            progressContainer.defaultValue = `
+                <div id="progress-container" style="width: 100%; background-color: #f3f3f3; border-radius: 25px; overflow: hidden; margin: 20px 0;">
+                    <div id="progress-bar" style="width: 0%; height: 30px; background-color: #4caf50; text-align: center; line-height: 30px; color: white; border-radius: 25px;">0%</div>
+                </div>
+                <input type="hidden" id="custpage_status" value="${task.checkStatus(paramTaskId).status}">
+                <script>
+                    let interval;
+                    let progressBarComplete = false;
+        
+                    function animateProgressBar() {
+                        let progressBar = document.getElementById("progress-bar");
+                        let width = 0;
+                        interval = setInterval(() => {
+                            if (width >= 100) {
+                                width = 100;
+                                progressBarComplete = true; // Set the flag to true when complete
+                                clearInterval(interval); // Stop the interval
+                                document.getElementById("progress-container").style.display = 'none'; // Hide progress bar
+                                // Trigger submit button click when progress is complete
+                                document.querySelector('input[type="submit"]').click();
+                            } else {
+                                width++;
+                            }
+                            progressBar.style.width = width + '%';
+                            progressBar.textContent = width + '%';
+                        }, 12); // Faster animation (reduced interval time)
+                    }
+        
+                    function stopProgressBar() {
+                        clearInterval(interval);
+                        document.getElementById("progress-container").style.display = 'none';
+                    }
+        
+                    // Ensure the progress bar animation starts when the page loads
+                    window.addEventListener('load', () => {
+                        animateProgressBar();
+                        
+                        // Check the status from the hidden field
+                        const status = document.getElementById('custpage_status').value;
+                        if (status === 'COMPLETE') {
+                            stopProgressBar();
+                        }
+                    });
+                </script>
+            `;
+        
             var taskStatus = task.checkStatus(paramTaskId);
-            stStatus = taskStatus.status;
-
+            var stStatus = taskStatus.status;
+        
             if (stStatus === 'PROCESSING'){
                 addButtons({
                     form: objForm,
                     status: stStatus
-                });
-                objForm.addPageInitMessage({
-                    type: message.Type.CONFIRMATION,
-                    message: 'Data Creation ' + stStatus,
-                    duration: 5000
                 });
             } else if (stStatus === 'COMPLETE'){
                 addButtons({
                     form: objForm,
                     status: stStatus
                 });
-                objForm.addPageInitMessage({
-                    type: message.Type.CONFIRMATION,
-                    message: 'Data Creation ' + stStatus,
-                    duration: 5000
-                });
             } else if (stStatus === 'PENDING'){
                 addButtons({
                     form: objForm,
                     status: stStatus
-                });
-                objForm.addPageInitMessage({
-                    type: message.Type.CONFIRMATION,
-                    message: stStatus + ' Data Creation!',
-                    duration: 5000
                 });
             } else {
                 addButtons({

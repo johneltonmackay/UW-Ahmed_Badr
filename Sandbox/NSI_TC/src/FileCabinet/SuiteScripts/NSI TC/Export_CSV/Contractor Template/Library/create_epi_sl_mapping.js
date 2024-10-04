@@ -13,13 +13,13 @@ define([],
             exportSLId: 'customscript_csv_export_landing_page_sl',
             exportSLDepId: 'customdeploy_csv_export_landing_page_sl',
             form: {
-                title: "EPI Record Creation",
+                title: "EPI4A110 Record Creation",
                 fields: {
                     EPI_DATA: {
                         id: "custpage_epi_data",
                         type: "LONGTEXT",
                         label: "EPI DATA",
-                        ishidden: true,
+                        ishidden: false,
                         ismandatory: true,
                         hasdefault: true
                     },
@@ -34,7 +34,7 @@ define([],
                         id: "custpage_mr_id",
                         type: "LONGTEXT",
                         label: "TASK Id",
-                        ishidden: true,
+                        ishidden: false,
                         hasdefault: true
                     },
                 },
@@ -56,12 +56,12 @@ define([],
                 sublistfields: {
                     PARENT: {
                         id: "custpage_parent_record_id",
-                        label: "PARENT RECORD ID",
+                        label: "PAYROLL PERIOD ID",
                         type : 'text',
                     },
                     VIEW: {
                         id: "custpage_view",
-                        label: "CHILD RECORD ID",
+                        label: "PAYROLL RECORD ID",
                         type : 'text',
                     },
                     REMARKS: {

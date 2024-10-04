@@ -2,7 +2,7 @@
  * @NApiVersion 2.1
  * @NScriptType Suitelet
  */
-define(['N/file', 'N/record', 'N/search', "../Library/csv_export_sl_module.js", "../Library/csv_export_sl_mapping.js", "N/redirect"],
+define(['N/file', 'N/record', 'N/search', "../Library/epia0f11_csv_export_sl_module.js", "../Library/epia0f11_csv_export_sl_mapping.js", "N/redirect"],
     /**
  * @param{file} file
  * @param{record} record
@@ -30,12 +30,14 @@ define(['N/file', 'N/record', 'N/search', "../Library/csv_export_sl_module.js", 
                     log.debug('POST onRequest scriptObj', scriptObj);
                     let strBatchId = scriptContext.request.parameters['custpage_batch_id'];
                     let strDateRange = scriptContext.request.parameters['inpt_custpage_date_range'];
+                    let intDateRange = scriptContext.request.parameters['custpage_date_range'];
                     let blnIsPost = scriptContext.request.parameters['custpage_is_post'];
                     if (blnIsPost == 'T') {
                         let objPostParam = {
                             custpage_batch_id: strBatchId,
                             custpage_date_range: strDateRange,
                             custpage_is_post: true,
+                            intDateRange: intDateRange
                         }
                         arrParam.push(objPostParam)
                         redirect.toSuitelet({

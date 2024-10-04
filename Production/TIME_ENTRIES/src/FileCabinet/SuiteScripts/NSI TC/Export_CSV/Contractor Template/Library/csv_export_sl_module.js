@@ -74,6 +74,11 @@ define(["N/ui/serverWidget", "N/search", "N/task", "N/file", "N/record", "../Lib
                             objField.addSelectOption(slMapping.SUITELET.form.selectOptions[strKey]);
                         }
                     }
+                    if (slMapping.SUITELET.form.fields[strKey].isdisabled) {
+                        objField.updateDisplayType({
+                            displayType: serverWidget.FieldDisplayType.DISABLED
+                        });
+                    }
                 }
             } catch (err) {
                 log.error("BUILD_FORM_ADD_BODY_FILTERS_ERROR", err.message);
@@ -82,6 +87,8 @@ define(["N/ui/serverWidget", "N/search", "N/task", "N/file", "N/record", "../Lib
 
         const addSublistFields = (options) => {
             try {
+                let total_amount_fee = 0
+                let total_amout_hst = 0
                 let sublist = options.form.addSublist({
                     id : 'custpage_sublist',
 					type : serverWidget.SublistType.LIST,
@@ -95,16 +102,59 @@ define(["N/ui/serverWidget", "N/search", "N/task", "N/file", "N/record", "../Lib
                 let arrParam = options.parameters
                 log.debug('addSublistFields arrParam', arrParam);
                 if (arrParam){
+                    var objRangeField = options.form.getField({
+                        id: 'custpage_date_range',
+                        container: 'custpage_fieldgroup'
+                    });
+
+                    log.debug('objRangeField', objRangeField)
+
                     let arrSearchResults = runSearch(arrParam)
+
+                    if (arrSearchResults && arrSearchResults.length > 0) {
+                        let fileID = createFileLogs(JSON.stringify(arrSearchResults));
+                        var objField = options.form.getField({
+                            id: 'custpage_epi_data',
+                            container: 'custpage_fieldgroup'
+                        });
+                        objField.defaultValue = fileID
+                    }
+
+                    arrSearchResults.forEach(element => {
+                        let amountFee = element.custpage_earn_5_amount_col_07 ? parseFloat(element.custpage_earn_5_amount_col_07) : 0
+                        let amountHST = element.custpage_earn_5_amount_col_09 ? parseFloat(element.custpage_earn_5_amount_col_09) : 0
+    
+                        total_amount_fee = total_amount_fee + amountFee
+                        total_amout_hst = total_amout_hst + amountHST
+                    });
+
+                    const arrTotalFields = [
+                        { id: 'custpage_total_earn_5_amount_col_7', value: total_amount_fee },
+                        { id: 'custpage_total_earn_5_amount_col_9', value: total_amout_hst },
+                    ];
+
+                    log.debug('arrTotalFields', arrTotalFields)
+                    
+                    arrTotalFields.forEach(field => {
+                        const objField = options.form.getField({
+                            id: field.id,
+                            container: 'custpage_fieldgroup'
+                        });
+                        log.debug('objField', objField)
+                        objField.defaultValue = field.value;
+                    });
+
                     arrSearchResults.forEach((data, index) => {
                         for (const key in data) {
-                            let value = data[key];
-                            if (value !== undefined && value !== null && value !== ''){
-                                sublist.setSublistValue({
-                                    id: key,
-                                    line: index,
-                                    value: value,
-                                }); 
+                            if (key != 'custpage_date_range'){
+                                let value = data[key];
+                                if (value !== undefined && value !== null && value !== ''){
+                                    sublist.setSublistValue({
+                                        id: key,
+                                        line: index,
+                                        value: value,
+                                    }); 
+                                }
                             }
                         }
                     });
@@ -114,13 +164,32 @@ define(["N/ui/serverWidget", "N/search", "N/task", "N/file", "N/record", "../Lib
             }
         }
 
+        const createFileLogs = (arrLogs) => {
+            log.debug('createFileLogs arrLogs', arrLogs)
+            let today = new Date();
+            let fileName = 'paramContractorData.json';
+
+            let fileObj = file.create({
+                name: fileName,
+                fileType: file.Type.JSON,
+                contents: arrLogs
+            });
+
+            fileObj.folder = 1489; // NSI TC > Export_CSV > Contractor Template > Parameter Contractor Data
+
+            let logId = fileObj.save();
+            log.debug('createFileLogs logId', logId)
+
+            return logId
+        }
+
         const runSearch = (arrParam) => {
-            log.debug('runSearch arrParam', arrParam)
             try {
                 let arrNewParam = JSON.parse(arrParam)
                 log.debug('runSearch arrNewParam', arrNewParam)
                 let intBatchId = arrNewParam[0].custpage_batch_id;
-                log.debug('runSearch intBatchId', intBatchId);
+                let intDateId = arrNewParam[0].intDateRange;
+                // log.debug('runSearch intBatchId', intBatchId);
                 
                 let dateRange = arrNewParam[0].custpage_date_range;
                 log.debug('runSearch custpage_date_range', dateRange);
@@ -129,15 +198,18 @@ define(["N/ui/serverWidget", "N/search", "N/task", "N/file", "N/record", "../Lib
                 let dtFrom = rawDate[0].trim(); 
                 let dtTo = rawDate[1].trim(); 
                 
-                log.debug('Parsed Start Date:', dtFrom);
-                log.debug('Parsed End Date:', dtTo);
+                // log.debug('Parsed Start Date:', dtFrom);
+                // log.debug('Parsed End Date:', dtTo);
                 let arrSearchResults = []
+                // Contractor
                 let objSavedSearch = search.create({
                     type: 'employee',
                     filters: [
-                        ['employeestatus', 'anyof', '9'], // Contractor- FT
+                        ['employeestatus', 'anyof', '10'], // Active
                         'AND',
-                        ['laborcost', 'isnotempty', ''],
+                        ['employeetype', 'anyof', '17', '5'], // Full Time Contractor or Part Time Contractor
+                        'AND',
+                        ['custentity_nsi_labor_cost', 'isnotempty', ''],
                         'AND',
                         ['custentity_adp_file_number', 'isnotempty', ''],
                         'AND',
@@ -147,7 +219,7 @@ define(["N/ui/serverWidget", "N/search", "N/task", "N/file", "N/record", "../Lib
                     ],
                     columns: [
                         search.createColumn({ name: 'altname', label: 'custpage_emp_name' }),
-                        search.createColumn({ name: 'laborcost', label: 'custpage_labor_cost' }),
+                        search.createColumn({ name: 'custentity_nsi_labor_cost', label: 'custpage_labor_cost' }),
                         search.createColumn({ name: 'custentity_adp_file_number', label: 'custpage_file_no_col_03' }),
                         search.createColumn({ name: 'custentity_adp_co_code', label: 'custpage_co_code_col_01' }),
                         search.createColumn({ name: 'internalid', label: 'custpage_emp_internalid' }),
@@ -196,6 +268,7 @@ define(["N/ui/serverWidget", "N/search", "N/task", "N/file", "N/record", "../Lib
                                 objData.custpage_earn_5_amount_col_09 = custpage_earn_5_amount_col_09 ? custpage_earn_5_amount_col_09 : 0
                                 objData.custpage_dtFrom = dtFrom;
                                 objData.custpage_dtTo = dtTo;
+                                objData.custpage_date_range = intDateId;
                                 arrSearchResults.push(objData);
                             }
                         }   
@@ -223,20 +296,20 @@ define(["N/ui/serverWidget", "N/search", "N/task", "N/file", "N/record", "../Lib
                 let dtDateTo = data.custpage_dtTo
 
                 let parseDateFrom = formatISODate(dtDateFrom);
-                log.debug('parseDateFrom', parseDateFrom)
+                // log.debug('parseDateFrom', parseDateFrom)
                 
                 let parseDateTo = formatISODate(dtDateTo);
-                log.debug('parseDateTo', parseDateTo)
+                // log.debug('parseDateTo', parseDateTo)
         
                 if (dtRelease) {
 
                     let parsedRelease = formatISODate(dtRelease);
-                    log.debug('dtRelease', dtRelease)
+                    // log.debug('dtRelease', dtRelease)
                     
                     if (parsedRelease >= parseDateFrom && parsedRelease <= parseDateTo) {
                         arrValidatedEmp.push(data);
-                    } else if (parseDateFrom > parsedRelease){
-                        data.reason = 'From Date Range is greater than Release Date';
+                    } else if (parseDateFrom >= parsedRelease){
+                        data.reason = 'From Date Range is greater than or equal to Release Date';
                         arrFilterOutEmp.push(data);
                     } else {
                         arrValidatedEmp.push(data);
@@ -244,9 +317,11 @@ define(["N/ui/serverWidget", "N/search", "N/task", "N/file", "N/record", "../Lib
                 } else {
 
                     let parsedHired = formatISODate(dtHired);
-                    log.debug('dtHired', dtHired)
+                    // log.debug('dtHired', dtHired)
                     
                     if (parsedHired >= parseDateFrom && parsedHired <= parseDateTo) {
+                        arrValidatedEmp.push(data);
+                    } else if (parseDateFrom >= parsedHired){
                         arrValidatedEmp.push(data);
                     } else {
                         data.reason = 'Hired Date is Out of Date Ranged';
@@ -264,7 +339,7 @@ define(["N/ui/serverWidget", "N/search", "N/task", "N/file", "N/record", "../Lib
             try {
                 let dtFrom = convertDateFormat(paramDtFrom)
                 let dtTo = convertDateFormat(paramDtTo)
-                log.debug('date', dtFrom + " " + dtTo)
+                // log.debug('date', dtFrom + " " + dtTo)
                 let intTotal = 0
                 let arrSearchResults = []
                 let objSavedSearch = search.create({
@@ -275,6 +350,8 @@ define(["N/ui/serverWidget", "N/search", "N/task", "N/file", "N/record", "../Lib
                         ['date', 'within', dtFrom, dtTo],
                         'AND',
                         ['employee.internalid', 'anyof', empId],
+                        'AND',
+                        ['employee.employeestatus', 'anyof', '10'],
                     ],
                     columns: [
                         search.createColumn({ name: 'hours', label: 'intDuration'}),
@@ -306,7 +383,7 @@ define(["N/ui/serverWidget", "N/search", "N/task", "N/file", "N/record", "../Lib
                         }   
                     }
                 }
-            log.debug(`runTimeSearch arrSearchResults ${Object.keys(arrSearchResults).length}`, arrSearchResults);
+            // log.debug(`runTimeSearch arrSearchResults ${Object.keys(arrSearchResults).length}`, arrSearchResults);
 
             arrSearchResults.forEach(data => {
                 intTotal += data

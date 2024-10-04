@@ -46,7 +46,7 @@ define([],
                 },
                 buttons: {
                     SUBMIT: {
-                        label: 'Create Employees Payroll Records',
+                        label: 'Create Contractors Payroll Records',
                     },
                     SEARCH_ITEM: {
                         label: 'PREVIEW',

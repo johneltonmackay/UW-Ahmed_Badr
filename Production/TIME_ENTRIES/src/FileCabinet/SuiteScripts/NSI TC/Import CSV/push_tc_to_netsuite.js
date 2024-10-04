@@ -2,27 +2,30 @@
  * @NApiVersion 2.1
  * @NScriptType MapReduceScript
  */
-define(['N/file', 'N/record', 'N/search', 'N/runtime', 'N/format'],
+define(['N/file', 'N/record', 'N/search', 'N/runtime', 'N/format', 'N/url', 'N/https', 'N/redirect'],
     /**
  * @param{file} file
  * @param{record} record
  * @param{search} search
  */
-    (file, record, search, runtime, format) => {
+    (file, record, search, runtime, format, url, https, redirect) => {
   
         const getInputData = (inputContext) => {
             try {
                 let csvData = [];
+                let emptyLines = []; 
                 let skippedLines = []; 
                 let arrFilteredItems = []
                 let validatedData = []
                 let forUpdate = []
+                let isStatWork = false
 
                 const stFileIdParam = runtime.getCurrentScript().getParameter({
                     name: 'custscript_file_name'
                 });
 
                 if (stFileIdParam){
+
                     let arrFileId = searchFileId(stFileIdParam)
                     let intFileId = arrFileId[0].fileId
                     log.debug('getInputData intFileId', intFileId)
@@ -38,9 +41,9 @@ define(['N/file', 'N/record', 'N/search', 'N/runtime', 'N/format'],
         
                         for (let i = 0; i < fileLines.length; i++) {
                             let line = fileLines[i].trim();
-                        
-                            if (!line || line.split(',').length < 5) {
-                                skippedLines.push({
+
+                            if (!line || line.split(',').length < 6) {
+                                emptyLines.push({
                                     lineNumber: i + 1,
                                     lineValue: line,
                                     reason: 'Has Empty Values'
@@ -48,48 +51,75 @@ define(['N/file', 'N/record', 'N/search', 'N/runtime', 'N/format'],
                             }
                         
                             let columns = line.split(',').map(col => col.trim());
-                        
-                            if (columns.length === 5) {
+                            
+                            if (columns.length === 6) {
                                 let obj = {
                                     'lineNumber': i + 1,
                                     'fileId': stFileIdParam,
-                                    'projectId': columns[0],
-                                    'taskId': columns[1],
-                                    // 'class': columns[2],
-                                    'employeeId': columns[2],
-                                    'actualHours': columns[3],
-                                    'date': columns[4].replace('\r', ''),
+                                    'projectId': columns[0].replace(/"/g, ''),
+                                    'taskId': columns[1].replace(/"/g, ''),
+                                    'employeeId': columns[2].replace(/"/g, ''),
+                                    'actualHours': parseFloat(columns[3].replace(/"/g, '')).toFixed(2),
+                                    'hourType': columns[4].replace(/"/g, ''),
+                                    'date': returnDateFormat(columns[5].replace(/"/g, '')),
+                                    'csvDate': columns[5].replace(/"/g, '')
                                 };
                                 csvData.push(obj);
-                            } 
+                            }
                         }
-        
+                        log.debug('getInputData fileContent', fileContent)
+                        log.debug('getInputData csvData', csvData)
+
                         csvData.forEach((data, i) => { 
                             let projId = data.projectId;
                             let taskId = data.taskId;
                             let empId = data.employeeId;
-                            let actHours = parseFloat(data.actualHours).toFixed(2);
-                            let date = returnDateFormat(data.date)
+                            let actHours = data.actualHours;
+                            let hourType = data.hourType;
+                            let date = returnNSDateFormat(data.date)
+
+                            let taskIsStatWork = taskId.includes('.STAT');
+                            let isOvertime = hourType === 'OT';
+
+                            if (taskIsStatWork && isOvertime){
+                                isStatWork = true
+                                isOvertime = false
+                            } else {
+                                isStatWork = false
+                                if (hourType === 'OT'){
+                                    isOvertime = true
+                                } else{
+                                    isOvertime = false
+                                }
+                            }
+
+                            let positiveHours = actHours.replace(/-/g, '')
+                            let convertedHours = convertHoursToTime(positiveHours)
 
                             let filter = {
                                 'projectId': projId,
                                 'taskId': taskId,
                                 'employeeId': empId,
+                                'actHours': convertedHours,
                                 'date': date,
-                                'actHours': actHours
-                            }
+                                'isStatWork': isStatWork,
+                                'isOvertime': isOvertime
+                            };
+
         
-                            log.debug('filter', filter)
-                            let positiveHours = actHours.replace(/-/g, '')
+                            log.debug('getInputData filter', filter)
+
                             const arrFilteredItems = arrTimeEntries.filter(item =>
                                 item.date == date &&
                                 item.empId == empId &&
                                 item.customer == projId &&
                                 item.taskId == taskId &&
-                                item.hours == convertHoursToTime(positiveHours)
+                                item.hours == convertedHours &&
+                                item.ot == isOvertime &&
+                                item.stat == isStatWork
                             );
         
-                            log.debug('arrTimeEntries arrFilteredItems', arrFilteredItems)
+                            log.debug('getInputData arrTimeEntries arrFilteredItems', arrFilteredItems)
                         
                             if (arrFilteredItems.length > 0) {
                                 skippedLines.push({
@@ -122,7 +152,7 @@ define(['N/file', 'N/record', 'N/search', 'N/runtime', 'N/format'],
                 }
 
                 arrFilteredItems.push(inputData)
-                log.debug('arrFilteredItems', arrFilteredItems);
+                log.debug('getInputData arrFilteredItems', arrFilteredItems);
 
                 return arrFilteredItems;  
             } catch (error) {
@@ -140,7 +170,6 @@ define(['N/file', 'N/record', 'N/search', 'N/runtime', 'N/format'],
                 let arrSkippedLines = objMapValue.skippedLines
                 let arrToUpdateLines = objMapValue.forUpdate
                 let resProjId = []
-                // let resClassId  = []
                 let resEmpId  = []
                 let resTaskId  = []
                 let arrValidatedData = []
@@ -149,14 +178,13 @@ define(['N/file', 'N/record', 'N/search', 'N/runtime', 'N/format'],
                     
                     let hasProjectId = true
                     let hasTaskId = true
-                    // let hasClassId = true
                     let hasEmployeeId = true
 
                     let intprojectId = dataToProcess.projectId
                     let intTaskId = dataToProcess.taskId
-                    // let strClass = dataToProcess.class
                     let intEmployeeId = dataToProcess.employeeId
                     let intHours = dataToProcess.actualHours
+                    let blnType = dataToProcess.hourType
                     let intDate = dataToProcess.date
                     let intLineNumber = dataToProcess.lineNumber
         
@@ -183,18 +211,6 @@ define(['N/file', 'N/record', 'N/search', 'N/runtime', 'N/format'],
                             hasTaskId = false
                         }   
                     }
-
-                    // if (strClass){
-                    //     resClassId = searchClassId(strClass)
-                    //     if (resClassId.length == 0){
-                    //         arrSkippedLines.push({
-                    //             lineNumber: intLineNumber,
-                    //             lineValue: dataToProcess, 
-                    //             reason: 'Invalid Class ID: ' + strClass 
-                    //         });
-                    //         hasClassId = false
-                    //     }      
-                    // }
         
                     if (intEmployeeId){
                         resEmpId = searchEmpId(intEmployeeId)
@@ -213,10 +229,15 @@ define(['N/file', 'N/record', 'N/search', 'N/runtime', 'N/format'],
                             lineNumber: intLineNumber,
                             employee: resEmpId[0].empId ? resEmpId[0].empId : null,
                             customer: resProjId[0].projectId ? resProjId[0].projectId : null,
-                            // class: resClassId[0].classId ? resClassId[0].classId : null,
                             task: resTaskId[0].taskId ? resTaskId[0].taskId : null,
                             hours: intHours ? intHours : null,
-                            trandate: intDate ? intDate : null
+                            trandate: intDate ? intDate : null,
+                            ot: blnType === 'OT' && !intTaskId.includes('.STAT') ? true : false,
+                            stat: intTaskId.includes('.STAT') && blnType === 'OT' ? true : false,
+                            csvTaskId: intTaskId,
+                            csvEmpId: intEmployeeId,
+                            csvDate: intDate
+
                         }
                         arrValidatedData.push(data)
                     }
@@ -272,68 +293,63 @@ define(['N/file', 'N/record', 'N/search', 'N/runtime', 'N/format'],
                     arrTimeEntries.push(parsedEntry);
                 }
 
-                arrTimeEntries.forEach((data, i) => {
-                    try {
-                        let objTimeEntries = record.create({
-                            type: record.Type.TIME_BILL,
-                            isDynamic: true
-                        })
-        
-                        objTimeEntries.setValue({
-                            fieldId: 'employee',
-                            value: data.employee
-                        })
-        
-                        objTimeEntries.setValue({
-                            fieldId: 'trandate',
-                            value: data.trandate
-                        })
+                const CHUNK_SIZE = 40;
 
-                        objTimeEntries.setValue({
-                            fieldId: 'hours',
-                            value: data.hours
-                        })
-        
-                        objTimeEntries.setValue({
-                            fieldId: 'customer',
-                            value: data.customer
-                        })
-    
-                        objTimeEntries.setValue({
-                            fieldId: 'casetaskevent',
-                            value: data.task
-                        })
-    
-                        // objTimeEntries.setValue({
-                        //     fieldId: 'class',
-                        //     value: data.class
-                        // })
-    
-                        let recordId = objTimeEntries.save({
-                            enableSourcing: true,
-                            ignoreMandatoryFields: true
-                        });
-    
-                        log.debug("reduce recordId", recordId)
-    
-                        if (recordId){
-                            arrProcessLines.push({
-                                lineNumber: data.lineNumber,
-                                lineValue: data, 
-                                reason: 'Record creation Success with Record ID: ' + recordId
+                if (arrTimeEntries.length > CHUNK_SIZE) {
+                    let chunks = splitArrayIntoChunks(arrTimeEntries, CHUNK_SIZE);
+                    
+                    for (let i = 0; i < chunks.length; i++) {
+                        let chunk = chunks[i];
+
+                        let fileId = createChunkFile(chunk, i)
+
+                        if (fileId){
+                            let slResponse = https.requestSuitelet({
+                                scriptId: "customscript_process_tc_sl",
+                                deploymentId: "customdeploy_process_tc_sl",
+                                urlParams: {
+                                    data: fileId
+                                }
                             });
+    
+                            let responseBody = JSON.parse(slResponse.body);
+                            log.debug('slResponse', responseBody);
+    
+                            if (responseBody.objLogs && responseBody.objLogs.skippedLines) {
+                                arrSkippedLines = [...arrSkippedLines, ...responseBody.objLogs.skippedLines];
+                            }
+    
+                            if (responseBody.objLogs && responseBody.objLogs.processLines) {
+                                arrProcessLines = [...arrProcessLines, ...responseBody.objLogs.processLines];
+                            }
+                        }
+                        
+                    }
+                } else {
+                    let fileId = createChunkFile(arrTimeEntries, 0)
+
+                    if (fileId){
+                        let slResponse = https.requestSuitelet({
+                            scriptId: "customscript_process_tc_sl",
+                            deploymentId: "customdeploy_process_tc_sl",
+                            urlParams: {
+                                data: fileId
+                            }
+                        });
+                        
+                        let responseBody = JSON.parse(slResponse.body);
+                        log.debug('slResponse', responseBody);
+    
+                        if (responseBody.objLogs && responseBody.objLogs.skippedLines) {
+                            arrSkippedLines = [...arrSkippedLines, ...responseBody.objLogs.skippedLines];
                         }
     
-                    } catch (arrTimeEntriesError) {
-                        log.error('arrTimeEntriesError error', arrTimeEntriesError.message)
-                        arrSkippedLines.push({
-                            lineNumber: data.lineNumber,
-                            lineValue: data, 
-                            reason: arrTimeEntriesError.message
-                        });
+                        if (responseBody.objLogs && responseBody.objLogs.processLines) {
+                            arrProcessLines = [...arrProcessLines, ...responseBody.objLogs.processLines];
+                        }
                     }
 
-                });
+                }
 
                 arrToUpdateLines.forEach(data => {
                     let actHours = lineValue.data.actHours
@@ -379,8 +395,10 @@ define(['N/file', 'N/record', 'N/search', 'N/runtime', 'N/format'],
                     updatedTimeEntries: arrUpdatedTimeEntries
                 }
 
+                log.debug('objLogs', objLogs)
+
                 if (objLogs){
-                    createFileLogs(JSON.stringify(objLogs))
+                    createFileLogs(objLogs)
                 }
 
             } catch (error) {
@@ -393,7 +411,10 @@ define(['N/file', 'N/record', 'N/search', 'N/runtime', 'N/format'],
         }
 
         //Private Function
+
         const searchFileId = (strFileName) => {
+            log.debug('searchFileId strFileName', strFileName)
+
             let arrFileId = [];
             try {
                 let objSearch = search.create({
@@ -401,7 +422,7 @@ define(['N/file', 'N/record', 'N/search', 'N/runtime', 'N/format'],
                     filters: [
                         ['name', 'is', strFileName],
                         'AND',
-                        ['folder', 'anyof', '1478'], // NSI TC > Import CSV
+                        ['folder', 'anyof', '1612'], // NSI TC > Import CSV
                     ],
                     columns: [
                         search.createColumn({ name: 'created', sort: search.Sort.DESC }),
@@ -504,40 +525,6 @@ define(['N/file', 'N/record', 'N/search', 'N/runtime', 'N/format'],
             return arrTaskId;
         }
 
-        const searchClassId = (intClassId) => {
-            let arrClassId = [];
-            try {
-                let objSearch = search.create({
-                    type: 'classification',
-                    filters: [
-                        ['name', 'is', intClassId],
-                    ],
-                    columns: [
-                        search.createColumn({name: 'internalid'}),
-                    ],
-                });
-                var searchResultCount = objSearch.runPaged().count;
-                if (searchResultCount != 0) {
-                    var pagedData = objSearch.runPaged({pageSize: 1000});
-                    for (var i = 0; i < pagedData.pageRanges.length; i++) {
-                        var currentPage = pagedData.fetch(i);
-                        var pageData = currentPage.data;
-                        if (pageData.length > 0) {
-                            for (var pageResultIndex = 0; pageResultIndex < pageData.length; pageResultIndex++) {
-                                arrClassId.push({
-                                    classId: pageData[pageResultIndex].getValue({name: 'internalid'}),
-                                });
-                            }
-                        }
-                    }
-                }
-            } catch (err) {
-                log.error('searchClassId', err);
-            }
-            log.debug("searchClassId: arrClassId", arrClassId)
-            return arrClassId;
-        }
-
         const searchEmpId = (intEmployeeId) => {
             let arrEmpId = [];
             try {
@@ -584,7 +571,11 @@ define(['N/file', 'N/record', 'N/search', 'N/runtime', 'N/format'],
                         search.createColumn({ name: 'entityid', join: 'employee' }),
                         search.createColumn({ name: 'custentity_nsi_doc_no', join: 'customer' }),
                         search.createColumn({ name: 'hours' }),
-                        search.createColumn({ name: 'title', join: 'projecttask' }),
+                        search.createColumn({ name: 'custevent_chargecode', join: 'projecttask' }),
+                        search.createColumn({ name: 'custevent_chargecode', join: 'projecttask' }),
+                        search.createColumn({ name: 'custcol_time_track_over_time' }),
+                        search.createColumn({ name: 'custcol_time_track_statutory_work' }),
+
                     ],
                 });
                 var searchResultCount = objSearch.runPaged().count;
@@ -601,7 +592,9 @@ define(['N/file', 'N/record', 'N/search', 'N/runtime', 'N/format'],
                                     empId: pageData[pageResultIndex].getValue({ name: 'entityid', join: 'employee' }),
                                     customer: pageData[pageResultIndex].getValue({ name: 'custentity_nsi_doc_no', join: 'customer' }),
                                     hours: pageData[pageResultIndex].getValue({name: 'hours'}),
-                                    taskId: pageData[pageResultIndex].getValue({ name: 'title', join: 'projecttask' })
+                                    taskId: pageData[pageResultIndex].getValue({ name: 'custevent_chargecode', join: 'projecttask' }),
+                                    ot: pageData[pageResultIndex].getValue({ name: 'custcol_time_track_over_time' }),
+                                    stat: pageData[pageResultIndex].getValue({ name: 'custcol_time_track_statutory_work' })
                                 });
                             }
                         }
@@ -615,20 +608,70 @@ define(['N/file', 'N/record', 'N/search', 'N/runtime', 'N/format'],
         }
 
         const createFileLogs = (arrLogs) => {
-            log.debug('createFileLogs arrLogs', arrLogs)
+            log.debug('createFileLogs arrLogs', arrLogs);
             let today = new Date();
-            let fileName = today + '-logs.txt';
+            let fileName = today + '_logs.json';
+        
+            let logEntries = [];
+        
+            // Process skipped lines
+            if (arrLogs.skippedLines && arrLogs.skippedLines.length > 0) {
+                arrLogs.skippedLines.forEach(log => {
+                    let failedMessage = `Failed: time track record failed (line ${log.lineValue.lineNumber}) due to ${log.reason}`;
+                    logEntries.push(failedMessage);
+                });
+            }
 
+            // Process processed lines
+            if (arrLogs.processLines && arrLogs.processLines.length > 0) {
+                arrLogs.processLines.forEach(log => {
+                    let successMessage = `Success: time track record created for employee ${log.lineValue.csvEmpId} for task ${log.lineValue.csvTaskId} with hours ${log.lineValue.hours} on ${log.lineValue.csvDate}`;
+                    logEntries.push(successMessage);
+                });
+            }
+
+            // Process updated time entries
+            if (arrLogs.updatedTimeEntries && arrLogs.updatedTimeEntries.length > 0) {
+                arrLogs.updatedTimeEntries.forEach(log => {
+                    let successMessage = `Success: time track record updated for employee ${log.lineValue.csvEmpId} for task ${log.lineValue.csvTaskId} with hours ${log.lineValue.hours} on ${log.lineValue.csvDate}`;
+                    logEntries.push(successMessage);
+                });
+            }
+        
             let fileObj = file.create({
                 name: fileName,
-                fileType: file.Type.PLAINTEXT,
-                contents: arrLogs
+                fileType: file.Type.JSON,
+                contents: JSON.stringify(logEntries)
             });
-
+        
             fileObj.folder = 1477; // NSI TC > Import CSV > File Logs
-
+        
             let logId = fileObj.save();
-            log.debug('createFileLogs logId', logId)
+            log.debug('createFileLogs logId', logId);
+            log.debug('createFileLogs content', JSON.stringify(logEntries));
+        };
+        
+
+        const createChunkFile = (arrLogs, index) => {
+            let logId = null
+            log.debug('createFileLogs arrLogs', arrLogs)
+            try {
+                let fileName = `paramChunkData_${index}.json`;
+    
+                let fileObj = file.create({
+                    name: fileName,
+                    fileType: file.Type.JSON,
+                    contents: JSON.stringify(arrLogs)
+                });
+    
+                fileObj.folder = 1491; // SuiteScripts > NSI TC > Import CSV > Parameter Chunk Data
+    
+                logId = fileObj.save();
+                log.debug('createFileLogs logId', logId)
+            } catch (error) {
+                log.error('createFileLogs error', error.message)
+            }
+            return logId
         }
 
         const convertDateFormat = (dateString) => {
@@ -636,30 +679,51 @@ define(['N/file', 'N/record', 'N/search', 'N/runtime', 'N/format'],
             return `${month}/${day}/${year}`;
         }
 
-        const returnDateFormat = (dateString) => {
+        const returnNSDateFormat = (dateString) => {
             const [month, day, year] = dateString.split('/');
             const paddedMonth = month.padStart(2, '0');
             const paddedDay = day.padStart(2, '0');
             return `${paddedDay}/${paddedMonth}/${year}`;
         }
 
+        const returnDateFormat = (dateString) => {
+            const year = dateString.slice(0, 4);
+            const month = dateString.slice(4, 6);
+            const day = dateString.slice(6, 8);
+            return `${day}/${month}/${year}`;
+        }
+
         const stringToDate = (date)  => {           
 
             return format.parse({value: date, type: format.Type.DATE});
         }
+
         const convertHoursToTime = (hours)  => { 
             // Convert hours to total minutes
-            let totalMinutes = Math.floor(hours * 60);
+            let totalMinutes = Math.round(hours * 60);
         
             // Calculate hours and minutes
             let hoursPart = Math.floor(totalMinutes / 60);
             let minutesPart = totalMinutes % 60;
         
             // Format the time duration as HH:mm
-            let formattedTime = `${hoursPart.toString().padStart(2, '0')}:${minutesPart.toString().padStart(2, '0')}`;
+            let formattedTime = `${hoursPart}:${minutesPart.toString().padStart(2, '0')}`;
             log.debug('convertHoursToTime formattedTime', formattedTime)
             return formattedTime;
         }
+
+        const splitArrayIntoChunks = (array, chunkSize)  => { 
+            let result = [];
+            for (let i = 0; i < array.length; i += chunkSize) {
+                result.push(array.slice(i, i + chunkSize));
+            }
+            return result;
+        }
+
         return {getInputData, map, reduce, summarize}
 
     });
+
+
+
+
