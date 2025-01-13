@@ -3,16 +3,14 @@
  * @NScriptType ClientScript
  * @NModuleScope SameAccount
  */
-define(['N/ui/message', 'N/search', 'N/currentRecord', '../Library/epia0f11_csv_export_sl_mapping.js', 'N/url', 'N/runtime', 'N/url'],
+define(['N/ui/message', 'N/search', 'N/currentRecord', '../Library/epia0f11_csv_export_sl_mapping.js', 'N/url', 'N/runtime'],
 
-    function (message, search, currentRecord, slMapping, url, runtime, url) {
+    function (message, search, currentRecord, slMapping, url, runtime) {
 
         function pageInit(scriptContext) {
             try {
                 console.log('Page Fully Loaded.');
                 var currentRecord = scriptContext.currentRecord;
-                let objForm = currentRecord.form
-                console.log('objForm', objForm);
                 let urlParams = new URLSearchParams(window.location.search);
                 let dataParam = urlParams.get('data');
                 let arrjsonData = JSON.parse(dataParam);
@@ -48,8 +46,6 @@ define(['N/ui/message', 'N/search', 'N/currentRecord', '../Library/epia0f11_csv_
                                 duration: 5000 
                             });
 
-                            // getSublistData()
-
                             let objEPIData = currentRecord.getValue({
                                 fieldId: 'custpage_epi_data',
                             });
@@ -58,11 +54,68 @@ define(['N/ui/message', 'N/search', 'N/currentRecord', '../Library/epia0f11_csv_
                                 scriptId: 'customscript_create_epia0f1_land_page_sl', 
                                 deploymentId: 'customdeploy_create_epia0f1_land_page_sl',
                                 params: {
-                                    postData: objEPIData // paramEmployeeData.txt
+                                    postData: objEPIData // paramContractorData.txt
                                 }
                             });
-                    
-                            window.location.href = suiteletUrl;
+
+                            // Use Ext.Ajax to fetch content from the Suitelet
+                            Ext.Ajax.request({
+                                url: suiteletUrl,
+                                method: 'GET',
+                                params: {
+                                    postData: objEPIData
+                                },
+                                success: function(response) {
+                                    let content = response.responseText;
+                                    let tempDiv = document.createElement('div');
+                                    tempDiv.innerHTML = content;
+                            
+                                    // Extract values of specific fields by ID
+                                    let mrIdValue = tempDiv.querySelector('#custpage_mr_id') ? tempDiv.querySelector('#custpage_mr_id').textContent.trim() : 'Field not found';
+                                    let transKeyValue = tempDiv.querySelector('#custpage_transkey') ? tempDiv.querySelector('#custpage_transkey').textContent.trim() : 'Field not found';
+                                    
+                                    async function checkScriptStatus(mrIdValue) {
+                                        // Show the loading message box once before entering the loop
+                                        const loadingMsgBox = Ext.MessageBox.show({
+                                            title: `Processing`,
+                                            msg: "Please Wait...",
+                                            wait: true,
+                                            icon: Ext.window.MessageBox.INFO,
+                                            width: 400,
+                                        });
+                                    
+                                        let isDone = false;
+                                    
+                                        while (!isDone) {
+                                            isDone = searchScriptStatus(mrIdValue);
+                                            await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for 1 seconds
+                                        }
+                                    
+                                        // Close the loading message box
+                                        loadingMsgBox.close();
+                                    
+                                        var suiteletVIEWUrl = url.resolveScript({
+                                            scriptId: 'customscript_create_epia0f1_land_page_sl', 
+                                            deploymentId: 'customdeploy_create_epia0f1_land_page_sl',
+                                            params: {
+                                                transkey: transKeyValue
+                                            }
+                                        });
+
+                                        window.onbeforeunload = null;
+                                        window.location.href = suiteletVIEWUrl;
+                                    }
+                                    
+                                    
+                                    // Call the async function
+                                    checkScriptStatus(mrIdValue);
+
+                                    
+                                },
+                                failure: function() {
+                                    Ext.MessageBox.alert('Error', 'Failed to load content from Suitelet.');
+                                }
+                            });
                         }
                     });
                 }
@@ -278,6 +331,45 @@ define(['N/ui/message', 'N/search', 'N/currentRecord', '../Library/epia0f11_csv_
             } catch (error) {
                 console.log('Error: getSublistData', error.message)
             }
+        }
+
+        const searchScriptStatus = (mrIdValue) => {
+            let isDone = true
+            try {
+                let objSearch = search.create({
+                    type: 'scheduledscriptinstance',
+                    filters:  [
+                        ['taskid', 'startswith', mrIdValue],
+                        'AND',
+                        ['enddate', 'isempty', ''],
+                    ],
+                    columns: [
+                        search.createColumn({ name: 'enddate' }),
+                    ]
+                });
+                
+                var searchResultCount = objSearch.runPaged().count;
+                if (searchResultCount != 0) {
+                    var pagedData = objSearch.runPaged({pageSize: 1000});
+                    for (var i = 0; i < pagedData.pageRanges.length; i++) {
+                        var currentPage = pagedData.fetch(i);
+                        var pageData = currentPage.data;
+                        if (pageData.length > 0) {
+                            for (var pageResultIndex = 0; pageResultIndex < pageData.length; pageResultIndex++) {
+                              let dtEndDate = pageData[pageResultIndex].getValue({name: 'enddate'})
+                              console.log("searchScriptStatus dtEndDate", dtEndDate)
+                              if (dtEndDate) {
+                                isDone = false
+                              }
+                            }
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error('searchScriptStatus', err.message);
+            }
+            console.log("searchScriptStatus isDone", isDone)
+            return isDone;
         }
 
         return {

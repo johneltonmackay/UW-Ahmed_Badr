@@ -421,7 +421,7 @@ define(['N/file', 'N/record', 'N/search', 'N/runtime', 'N/format', 'N/url', 'N/h
                     filters: [
                         ['name', 'is', strFileName],
                         'AND',
-                        ['folder', 'anyof', '1494'], // NSI TC > Import CSV
+                        ['folder', 'anyof', '1612'], // NSI TC > Import CSV
                     ],
                     columns: [
                         search.createColumn({ name: 'created', sort: search.Sort.DESC }),

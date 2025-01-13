@@ -55,17 +55,47 @@ define(['N/file', 'N/record', 'N/redirect', 'N/ui/serverWidget', 'N/error', 'N/t
                                         custscript_file_name: strFileName
                                     }
                                 });
-    
+                            
                                 var taskId = mapReduceTask.submit();
-                                log.debug('taskId', taskId)
-
-                                statusChecker(taskId, scriptContext)
-
+                                log.debug('taskId', taskId);
+                            
+                                // Retry logic if taskId is not valid
+                                var maxRetries = 5;  // Set maximum number of retries
+                                var retries = 0;
+                            
+                                while (!taskId && retries < maxRetries) {
+                                    log.debug('Retrying submission', 'Attempt #' + (retries + 1));
+                                    taskId = mapReduceTask.submit();
+                                    retries++;
+                                }
+                            
+                                if (taskId) {
+                                    redirect.toSuitelet({
+                                        scriptId: 'customscript_upload_csv_sl',
+                                        deploymentId: 'customdeploy_upload_csv_sl',
+                                        parameters: {
+                                            taskId: taskId
+                                        }
+                                    });
+                                } else {
+                                    let mycustomError = error.create({
+                                        name: 'NO DEPLOYMENT AVAILABLE',
+                                        message: 'Failed to submit task. Unable to get a valid task Id after ' + maxRetries + ' retries. Please Try Again Later.',
+                                        notifyOff: false
+                                    });
+            
+                                    redirect.toSuitelet({
+                                        scriptId: 'customscript_upload_csv_sl',
+                                        deploymentId: 'customdeploy_upload_csv_sl',
+                                        parameters: {
+                                            data: mycustomError.message
+                                        }
+                                    });
+                                }
                             }
+                            
                             log.debug('onRequest POST fileId', fileId);
                         }
-                    } else if (scriptObj.custpage_taskid){
-                        statusChecker(scriptObj.custpage_taskid, scriptContext)
                     } else {
                         redirect.toSuitelet({
                             scriptId: 'customscript_upload_csv_sl',
@@ -107,127 +137,14 @@ define(['N/file', 'N/record', 'N/redirect', 'N/ui/serverWidget', 'N/error', 'N/t
                         objForm.addSubmitButton({
                             label: 'Upload'
                         });
+
+                        objForm.clientScriptModulePath = './upload_csv_cs.js';
                     }
 
                     scriptContext.response.writePage(objForm);
                 }
             } catch (err) {
                 log.error('ERROR ONREQUEST:', err.message);
-            }
-        };
-
-        const statusChecker = (paramTaskId, scriptContext) => {
-            try {
-
-                const status = task.checkStatus(paramTaskId).status;
-
-                var objForm = serverWidget.createForm({
-                    title: 'Upload CSV',
-                });
-
-                const inttaskID = objForm.addField({
-                    id: 'custpage_taskid',
-                    type: serverWidget.FieldType.TEXT,
-                    label: 'Task Id'
-                });
-                inttaskID.updateDisplayType({displayType: 'HIDDEN'});
-                inttaskID.defaultValue = status === 'COMPLETE' ? null : paramTaskId;
-        
-                // Create a progress bar container
-                const progressContainer = objForm.addField({
-                    id: 'custpage_progress_container',
-                    type: serverWidget.FieldType.INLINEHTML,
-                    label: 'Progress Bar'
-                });
-            
-                // Set the HTML content for the progress bar and hidden field
-                progressContainer.defaultValue = `
-                    <div id="progress-container" style="width: 100%; background-color: #f3f3f3; border-radius: 25px; overflow: hidden; margin: 20px 0;">
-                        <div id="progress-bar" style="width: 0%; height: 30px; background-color: #4caf50; text-align: center; line-height: 30px; color: white; border-radius: 25px;">0%</div>
-                    </div>
-                    <input type="hidden" id="custpage_status" value="${task.checkStatus(paramTaskId).status}">
-                    <script>
-                        let interval;
-                        let progressBarComplete = false;
-            
-                        function animateProgressBar() {
-                            let progressBar = document.getElementById("progress-bar");
-                            let width = 0;
-                            interval = setInterval(() => {
-                                if (width >= 100) {
-                                    width = 100;
-                                    progressBarComplete = true; // Set the flag to true when complete
-                                    clearInterval(interval); // Stop the interval
-                                    document.getElementById("progress-container").style.display = 'none'; // Hide progress bar
-                                    // Trigger submit button click when progress is complete
-                                    document.querySelector('input[type="submit"]').click();
-                                } else {
-                                    width++;
-                                }
-                                progressBar.style.width = width + '%';
-                                progressBar.textContent = width + '%';
-                            }, 12); // Faster animation (reduced interval time)
-                        }
-            
-                        function stopProgressBar() {
-                            clearInterval(interval);
-                            document.getElementById("progress-container").style.display = 'none';
-                        }
-            
-                        // Ensure the progress bar animation starts when the page loads
-                        window.addEventListener('load', () => {
-                            animateProgressBar();
-                            
-                            // Check the status from the hidden field
-                            const status = document.getElementById('custpage_status').value;
-                            if (status === 'COMPLETE') {
-                                stopProgressBar();
-                                alert('CSV Upload Complete, You will be redirected soon.')
-                                document.querySelector('input[type="submit"]').click();
-                            }
-                        });
-                    </script>
-                `;
-            
-                var taskStatus = task.checkStatus(paramTaskId);
-                var stStatus = taskStatus.status;
-            
-                if (stStatus === 'PROCESSING'){
-                    addButtons({
-                        form: objForm,
-                        status: stStatus
-                    });
-                } else if (stStatus === 'PENDING'){
-                    addButtons({
-                        form: objForm,
-                        status: stStatus
-                    });
-                } else if (stStatus === 'COMPLETE'){
-                    addButtons({
-                        form: objForm,
-                        status: stStatus
-                    });
-                }
-
-                scriptContext.response.writePage(objForm);
-
-            } catch (error) {
-                log.error("statusChecker", error.message);
-            }
-
-        }
-
-        const addButtons = (options) => {
-            log.debug('addButtons options', options)
-            try {
-                if(options.status == 'PROCESSING' || options.status == 'PENDING' || options.status == 'COMPLETE'){
-                    const submitButton = options.form.addSubmitButton({
-                        label: 'CHECK STATUS',
-                    });
-                    submitButton.isHidden = true;
-                } 
-            } catch (err) {
-                log.error("BUILD_FORM_ADD_BUTTONS_ERROR", err.message);
             }
         };
 

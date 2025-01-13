@@ -3,16 +3,14 @@
  * @NScriptType ClientScript
  * @NModuleScope SameAccount
  */
-define(['N/ui/message', 'N/search', 'N/currentRecord', '../Library/csv_export_sl_mapping.js', 'N/url', 'N/runtime', 'N/url', 'N/https', 'N/ui/dialog'],
+define(['N/ui/message', 'N/search', 'N/currentRecord', '../Library/csv_export_sl_mapping.js', 'N/url', 'N/runtime', 'N/https', 'N/ui/dialog'],
 
-    function (message, search, currentRecord, slMapping, url, runtime, url, https, dialog,) {
+    function (message, search, currentRecord, slMapping, url, runtime, https, dialog,) {
 
         function pageInit(scriptContext) {
             try {
                 console.log('Page Fully Loaded.');
                 var currentRecord = scriptContext.currentRecord;
-                let objForm = currentRecord.form
-                console.log('objForm', objForm);
                 let urlParams = new URLSearchParams(window.location.search);
                 let dataParam = urlParams.get('data');
                 let arrjsonData = JSON.parse(dataParam);
@@ -103,7 +101,8 @@ define(['N/ui/message', 'N/search', 'N/currentRecord', '../Library/csv_export_sl
                                                 transkey: transKeyValue
                                             }
                                         });
-                                
+
+                                        window.onbeforeunload = null;
                                         window.location.href = suiteletVIEWUrl;
                                     }
                                     
@@ -117,10 +116,6 @@ define(['N/ui/message', 'N/search', 'N/currentRecord', '../Library/csv_export_sl
                                     Ext.MessageBox.alert('Error', 'Failed to load content from Suitelet.');
                                 }
                             });
-                            
-                            
-                            
-                            
                         }
                     });
                 }
